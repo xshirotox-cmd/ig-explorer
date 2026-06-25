@@ -153,6 +153,16 @@ def read_points(path):
             t.append(a); i.append(b)
     return t, i
 
+def classify_mode(i_vals):
+    """flow = rises to a later peak then plateaus; static = starts at max & decays."""
+    a = [abs(x) for x in i_vals]
+    n = len(a)
+    if n < 8: return "static"
+    start = float(np.median(a[:3]))
+    peak = max(a); pk = a.index(peak); frac = pk / n
+    rise = peak / start if start > 0 else 999
+    return "flow" if (rise >= 1.6 and frac >= 0.05) else "static"
+
 def steady_state_uA(i_vals):
     """median of last 20% of points, in microamps (input in A)."""
     if not i_vals: return None
@@ -217,6 +227,7 @@ def build_traces(exps, idx_by_folder):
                 "technique": r["technique"],
                 "label": label,
                 "role": role,
+                "mode": classify_mode(ivals),
                 "npoints": len(t),
                 "ss_uA": steady_state_uA(ivals),
                 "sample_interval_s": num(r.get("sample_interval_s")),

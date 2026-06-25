@@ -1,6 +1,7 @@
 /* Ig Biosensor Data Explorer — faceted navigation, pastel high-contrast charts. */
 const D = {}, PCACHE = {};
 const ANALYTE = {IgG:"#ffe08a", IgM:"#9be7a6", IgA:"#ff9e9e"};      // pastel on navy
+const MODE_COLOR = {static:"#7fd8e0", flow:"#ffb380"};             // aqua vs orange
 const CTRL = "#c2ccdf";
 const PALETTE = ["#ffe08a","#9be7a6","#ff9e9e","#c9b6f7","#7fd8e0","#f7b6dd","#d9e88a","#f5c08a"];
 const ROUTES = [["explore","Explore"],["dose-response","Dose-Response"],
@@ -73,7 +74,7 @@ function render(){
 const VIEWS={};
 
 /* ---------- EXPLORE (default): analyte -> standard/media -> conc/source ---------- */
-const EXP={analyte:null,kind:null,conc:"all",source:"all",role:"all",focus:null,showMean:true};
+const EXP={analyte:null,kind:null,mode:"static",conc:"all",source:"all",role:"all",focus:null,showMean:true};
 VIEWS.explore=(root)=>renderExplore(root);
 async function renderExplore(root){
   root.innerHTML=""; const {side,below}=shell(root);
@@ -88,7 +89,9 @@ async function renderExplore(root){
   const ctrls=[ picker("Target (analyte)", analytes.map(a=>({value:a,label:a})), EXP.analyte,
       e=>{EXP.analyte=e.target.value; reset(); renderExplore(root);}),
     picker("Type", kinds.map(k=>({value:k,label:k==="standard"?"Standard (spiked)":"Media (real sample)"})), EXP.kind,
-      e=>{EXP.kind=e.target.value; reset(); renderExplore(root);}) ];
+      e=>{EXP.kind=e.target.value; reset(); renderExplore(root);}),
+    picker("Measurement", [{value:"static",label:"Static (decay)"},{value:"flow",label:"Flow (peak→plateau)"},{value:"all",label:"Both (separated)"}], EXP.mode,
+      e=>{EXP.mode=e.target.value; reset(); renderExplore(root);}) ];
 
   if(EXP.kind==="standard"){
     const cs=uniq(pool.map(t=>t.conc_label)).filter(Boolean);
@@ -110,6 +113,7 @@ async function renderExplore(root){
 
   // final filter
   let sel=pool.slice();
+  if(EXP.mode!=="all") sel=sel.filter(t=>t.mode===EXP.mode);
   if(EXP.kind==="standard" && EXP.conc!=="all") sel=sel.filter(t=>t.conc_label===EXP.conc);
   if(EXP.kind==="media" && EXP.source!=="all") sel=sel.filter(t=>t.source===EXP.source);
   if(EXP.role!=="all") sel=sel.filter(t=>t.role===EXP.role);
@@ -126,10 +130,10 @@ async function renderExplore(root){
   // load points + draw
   const eids=uniq(sel.map(t=>t.experiment_id));
   const P={}; await Promise.all(eids.map(async id=>{P[id]=await points(id);}));
-  const colorBy = (EXP.kind==="standard"&&EXP.conc==="all") ? "conc" : (EXP.kind==="media"&&EXP.source==="all") ? "source" : "single";
-  const keyOf = t => colorBy==="conc"?t.conc_label : colorBy==="source"?t.source : EXP.analyte;
+  const colorBy = EXP.mode==="all" ? "mode" : (EXP.kind==="standard"&&EXP.conc==="all") ? "conc" : (EXP.kind==="media"&&EXP.source==="all") ? "source" : "single";
+  const keyOf = t => colorBy==="mode"?t.mode : colorBy==="conc"?t.conc_label : colorBy==="source"?t.source : EXP.analyte;
   const keys = uniq(sel.map(keyOf));
-  const colMap={}; keys.forEach((k,i)=>colMap[k]= colorBy==="single"?acolor(EXP.analyte):PALETTE[i%PALETTE.length]);
+  const colMap={}; keys.forEach((k,i)=>colMap[k]= colorBy==="mode"?(MODE_COLOR[k]||PALETTE[i%PALETTE.length]) : colorBy==="single"?acolor(EXP.analyte):PALETTE[i%PALETTE.length]);
   const data=[], seen={}, groups={};
   sel.forEach(t=>{ const p=P[t.experiment_id]?.[t.trace_id]; if(!p)return;
     const k=keyOf(t), col=t.role==="control"?CTRL:colMap[k];
@@ -143,7 +147,8 @@ async function renderExplore(root){
     data.push({x:b.t.concat(b.t.slice().reverse()),y:b.hi.concat(b.lo.slice().reverse()),fill:"toself",fillcolor:hexA(col,.13),line:{width:0},legendgroup:k,showlegend:false,hoverinfo:"skip"});
     data.push({x:b.t,y:b.m,mode:"lines",line:{width:3.4,color:col},legendgroup:k,showlegend:false,hoverinfo:"skip"}); }
   const subt = EXP.kind==="standard" ? (EXP.conc==="all"?"all concentrations":EXP.conc) : (EXP.source==="all"?"all sources":EXP.source);
-  drawTo("plot", data.length?data:[], lay({title:{text:`${EXP.analyte} · ${EXP.kind} · ${subt}  —  i-t curves`},
+  const modet = EXP.mode==="all"?"flow + static":EXP.mode;
+  drawTo("plot", data.length?data:[], lay({title:{text:`${EXP.analyte} · ${EXP.kind} · ${modet} · ${subt}  —  i-t curves`},
     xaxis:ax("Time (s)"), yaxis:ay("Current (µA)"), showlegend:true}));
 
   // footer: source files
@@ -183,21 +188,22 @@ const evalFit=(f,x)=> f.type==="4pl"? f.d+(f.a-f.d)/(1+(x/f.c)**f.b) : f.slope*M
 /* ---------- reproducibility (aggregations: all controls / sensors) ---------- */
 VIEWS.reproducibility=(root)=>{
   const {side,below}=shell(root,{two:true});
-  let role="control", an="all";
+  let role="control", an="all", mode="static";
   side.append(grp("Aggregation",
     picker("Population",[{value:"control",label:"All controls"},{value:"sensor",label:"All sensors"}],role,e=>{role=e.target.value;paint();}),
+    picker("Measurement",[{value:"static",label:"Static (decay)"},{value:"flow",label:"Flow (peak→plateau)"},{value:"all",label:"Both"}],mode,e=>{mode=e.target.value;paint();}),
     picker("Analyte",[{value:"all",label:"All analytes"},...D.manifest.analytes.map(a=>({value:a,label:a}))],an,e=>{an=e.target.value;paint();})));
   const stat=el("div"); side.append(grp("Pooled",stat));
-  side.append(el("div",{class:"note"},"Top: every selected i-t trace overlaid with per-analyte mean ± SD. Bottom: steady-state current per analyte (bar = mean, dots = individual electrodes, jittered)."));
+  side.append(el("div",{class:"note"},"Top: every selected i-t trace overlaid with per-analyte mean ± SD (flow and static never averaged together). Bottom: steady-state current per analyte (bar = mean, dots = individual electrodes, jittered)."));
   async function paint(){
-    const sub=D.traces.filter(t=>t.role===role&&(an==="all"||t.analyte===an));
+    const sub=D.traces.filter(t=>t.role===role&&(an==="all"||t.analyte===an)&&(mode==="all"||t.mode===mode));
     const eids=uniq(sub.map(t=>t.experiment_id)); const P={}; await Promise.all(eids.map(async id=>{P[id]=await points(id);}));
     // top: i-t overlay grouped by analyte
     const data=[],seen={},groups={};
     sub.forEach(t=>{const p=P[t.experiment_id]?.[t.trace_id]; if(!p)return; const col=acolor(t.analyte);
-      data.push({x:p.t,y:p.i_uA,mode:"lines",line:{width:1,color:col},opacity:.4,legendgroup:t.analyte,showlegend:!seen[t.analyte],name:t.analyte,hovertext:t.label,hoverinfo:"text"});
-      seen[t.analyte]=1;(groups[t.analyte]=groups[t.analyte]||[]).push(p);});
-    for(const a in groups){const b=meanBand(groups[a]);if(!b)continue;data.push({x:b.t,y:b.m,mode:"lines",line:{width:3.6,color:acolor(a)},legendgroup:a,showlegend:false,hoverinfo:"skip"});}
+      data.push({x:p.t,y:p.i_uA,mode:"lines",line:{width:1,color:col},opacity:.4,legendgroup:t.analyte,showlegend:!seen[t.analyte],name:t.analyte,hovertext:`${t.label} · ${t.mode}`,hoverinfo:"text"});
+      seen[t.analyte]=1;(groups[t.analyte+"|"+t.mode]=groups[t.analyte+"|"+t.mode]||[]).push(p);});
+    for(const k in groups){const b=meanBand(groups[k]);if(!b)continue;const a=k.split("|")[0];data.push({x:b.t,y:b.m,mode:"lines",line:{width:3.6,color:acolor(a)},legendgroup:a,showlegend:false,hoverinfo:"skip"});}
     drawTo("plot",data,lay({title:{text:`${role==="control"?"All controls":"All sensors"} — i-t overlay (n=${sub.length})`},xaxis:ax("Time (s)"),yaxis:ay("Current (µA)"),showlegend:true}));
     // bottom: bar + jitter of steady-state by analyte
     const ans=uniq(sub.filter(t=>t.ss_uA!=null).map(t=>t.analyte)).sort();
@@ -262,8 +268,10 @@ VIEWS.detail=async(root,id)=>{
     el("div",{style:"margin-top:10px"},el("a",{class:"link",href:"#overview"},"‹ back to browse"))));
   if(e.shared_folder_with) side.append(el("div",{class:"note"},"Traces under: "+e.shared_folder_with));
   if(e.n_traces>0){ const P=await points(e.id); const tr=D.traces.filter(t=>t.experiment_id===e.id&&P[t.trace_id]);
-    drawTo("plot",tr.map(t=>({x:P[t.trace_id].t,y:P[t.trace_id].i_uA,mode:"lines",line:{width:1.5,color:t.role==="control"?CTRL:acolor(t.analyte)},name:t.label})),
-      lay({title:{text:`${e.analyte} · ${e.date} — traces`},xaxis:ax("Time (s)"),yaxis:ay("Current (µA)"),showlegend:true}));
+    const seen={};
+    drawTo("plot",tr.map(t=>({x:P[t.trace_id].t,y:P[t.trace_id].i_uA,mode:"lines",line:{width:1.5,color:MODE_COLOR[t.mode]||"#ccc"},
+      legendgroup:t.mode,showlegend:(seen[t.mode]?false:(seen[t.mode]=true)),name:t.mode,hovertext:t.label,hoverinfo:"text"})),
+      lay({title:{text:`${e.analyte} · ${e.date} — traces (flow vs static)`},xaxis:ax("Time (s)"),yaxis:ay("Current (µA)"),showlegend:true}));
   } else drawTo("plot",[],lay({title:{text:"No electrochemical traces"}}));
   if(e.methods) below.append(el("h3",{},"Methods"),el("pre",{class:"methods"},e.methods));
 };
