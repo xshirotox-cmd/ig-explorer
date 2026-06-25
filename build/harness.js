@@ -37,7 +37,7 @@ function go(hash,label){
   try{ if(L.hashchange) L.hashchange(); }catch(e){ ERRORS.push(label+": "+e); }
   for(var k=0;k<60;k++) drainMicrotasks();
 }
-var routes=["overview","morphology","dose-response","reproducibility","samples"];
+var routes=["explore","dose-response","reproducibility","samples","overview"];
 routes.forEach(function(r){go("#"+r,r);});
 // detail pages for a few experiments
 var exps=JSON.parse(read("data/experiments.json"));

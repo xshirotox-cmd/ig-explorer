@@ -109,11 +109,37 @@ def load_trace_index():
 
 def role_of(fname):
     f = fname.lower()
-    if re.search(r"\b(control|ctrl|blank|bare|^c\d|no ?igg|no ?ab|nc)\b", f) or f.startswith("c"):
+    if re.search(r"(\bcontrol\b|ctrl|blank|bare|\bnc\b|no ?ig|no ?ab|\bc\d*\b|c\d+$|\sc$)", f):
         return "control"
     if re.search(r"(igg|iga|igm|^g\d|^a\d|^m\d|target|pos|sample|10n|10v|5n|5v)", f):
         return "sensor"
     return "other"
+
+def parse_analyte(label, default):
+    s = label.lower()
+    if "iga" in s or "siga" in s: return "IgA"
+    if "igm" in s or "sigm" in s: return "IgM"
+    if "igg" in s: return "IgG"
+    return default
+
+def conc_display(ng):
+    if ng == 0: return "0 (blank)"
+    if ng < 1000: return f"{ng:g} ng/mL"
+    return f"{ng/1000:g} ug/mL"
+
+_CONC_RX = re.compile(r"^\s*(?:s?ig[gam]\s*)?(\d+\.?\d*)\s*(ug|µg|ng|pg|k|m)?\s*(.*)$", re.I)
+_UNIT = {"ug":1000,"µg":1000,"k":1000,"m":1e6,"pg":0.001,"ng":1,"":1}
+def parse_conc(label):
+    """Best-effort concentration (ng/mL) from a standard trace label."""
+    s = label.lower().strip()
+    if "blank" in s or s.startswith("0_") or s == "0": return 0.0, "0 (blank)"
+    m = _CONC_RX.match(s)
+    if not m: return None, None
+    val, unit, tail = m.group(1), (m.group(2) or "").lower(), m.group(3).strip()
+    if not unit and not (tail == "" or re.match(r"^(\d|r)", tail)):
+        return None, None            # trailing letters (e.g. "120s", "gel") => not a concentration
+    ng = float(val) * _UNIT[unit]
+    return ng, conc_display(ng)
 
 def read_points(path):
     t, i = [], []
@@ -169,16 +195,28 @@ def build_traces(exps, idx_by_folder):
             fname = os.path.basename(r["csv"])
             t, ivals = read_points(csv_path)
             if not t: continue
+            label = anon(os.path.splitext(fname)[0])
             tid = f'{e["id"]}__{anon_id(os.path.splitext(fname)[0])}'
+            analyte_t = parse_analyte(label, e["analyte"])
+            kind = "media" if e["sample_type"] in ("PBMC", "Bone Marrow") else "standard"
+            conc_ngml, conc_label = (parse_conc(label) if kind == "standard" else (None, None))
+            role = role_of(fname)
+            if role == "other" and kind == "standard" and conc_ngml is not None:
+                role = "control" if conc_ngml == 0 else "sensor"
             traces.append({
                 "trace_id": tid,
                 "experiment_id": e["id"],
-                "analyte": e["analyte"],
+                "analyte": analyte_t,
+                "exp_analyte": e["analyte"],
                 "sample_type": e["sample_type"],
+                "kind": kind,
+                "source": e["sample_type"] if kind == "media" else "",
+                "conc_ngml": conc_ngml,
+                "conc_label": conc_label or ("standard" if kind == "standard" else ""),
                 "date": (r.get("timestamp") or "")[:10],
                 "technique": r["technique"],
-                "label": anon(os.path.splitext(fname)[0]),
-                "role": role_of(fname),
+                "label": label,
+                "role": role,
                 "npoints": len(t),
                 "ss_uA": steady_state_uA(ivals),
                 "sample_interval_s": num(r.get("sample_interval_s")),
