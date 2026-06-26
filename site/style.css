@@ -75,3 +75,25 @@ h3{margin:0 0 .4em;font-size:13px;color:var(--mut);text-transform:uppercase;lett
 .srcchip{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:3px 10px;font-size:12px;color:var(--mut)}
 .srcchip a{color:var(--acc);text-decoration:none}
 button.link{background:none;border:none;padding:0;font:inherit;color:var(--acc);cursor:pointer}
+
+/* ---- mobile / narrow screens ---- */
+@media (max-width:760px){
+  body{overflow:auto;height:auto;min-height:100%}
+  header{grid-template-columns:1fr;gap:6px;padding:9px 12px}
+  .brand{font-size:15px}
+  .sub{text-align:left;font-size:11px}
+  nav{gap:4px;overflow-x:auto;flex-wrap:wrap}
+  nav a{padding:6px 10px}
+  main{flex:0 0 auto;overflow:visible;overflow-x:hidden;padding:10px}
+  .layout{flex-direction:column;height:auto;gap:12px}
+  .stage{order:1;min-height:0}
+  .sidebar{order:2;width:100%;flex:0 0 auto;overflow:visible}
+  .plot-big{flex:0 0 auto;height:56vh;min-height:330px}
+  #plot2{height:52vh}
+  .below{max-height:none;overflow:visible}
+  .browser{height:auto;overflow:visible}
+  /* keep wide tables from blowing out the viewport */
+  .below table,.browser table{display:block;overflow-x:auto;white-space:nowrap;font-size:12px}
+  .cards{gap:8px}.card{min-width:0;flex:1 1 40%;padding:10px 12px}
+  .filelist{max-height:200px}
+}
